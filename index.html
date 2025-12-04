@@ -17,16 +17,16 @@
         
         button, .file-btn { 
             width: 100%; padding: 14px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 1rem; 
-            transition: opacity 0.2s; box-sizing: border-box; display: block; text-align: center;
+            transition: opacity 0.2s; box-sizing: border-box; display: block; text-align: center; margin-top: 10px;
         }
         .btn-primary { background: #111; color: white; }
-        .btn-secondary { background: #2c3e50; color: white; margin-top: 10px; }
+        .btn-secondary { background: #2c3e50; color: white; }
+        .btn-info { background: #17a2b8; color: white; }
         .btn-cancel { background: #999; color: white; }
         button:active, .file-btn:active { opacity: 0.7; }
         
         #reader { width: 100%; background: black; border-radius: 8px; overflow: hidden; margin-bottom: 15px; min-height: 250px; }
         
-        /* メッセージ表示エリア（クリックで消せるように） */
         .msg { padding: 15px; border-radius: 6px; margin-bottom: 20px; display: none; text-align: center; font-weight: bold; width: 100%; max-width: 400px; box-sizing: border-box; cursor: pointer; }
         .msg-err { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .msg-suc { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
@@ -38,6 +38,11 @@
         }
         .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #333; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* 履歴テーブルスタイル */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -45,7 +50,7 @@
     <script>
         // ==========================================
         // ★重要★ GASのウェブアプリURLをここに貼り付けてください
-        const GAS_URL = "https://script.google.com/macros/s/AKfycby83nPLAaOV2PhD97kORZVZur6uhqNcGUXKpQZRS9ykdnWvm6TqF_tiZ243ol4OQgZ4qg/exec"; 
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbzDv8OE4fbPNyFLtiNwsyhndz57ryWpHowTsis12nmW8GJLAVhN-oiThEo8eQ8SN_x6Lg/exec"; 
         // ==========================================
     </script>
 
@@ -79,6 +84,8 @@
         
         <label for="qrInputFile" class="file-btn btn-secondary">画像をアップロードして解析</label>
         <input type="file" id="qrInputFile" accept="image/*" style="display:none;">
+
+        <button class="btn-info" onclick="fetchHistory()" style="margin-top: 20px;">履歴を見る</button>
     </div>
 
     <div id="inputArea" class="card" style="display:none;">
@@ -98,32 +105,41 @@
         </div>
     </div>
 
+    <div id="historyArea" class="card" style="display:none;">
+        <h1>利用履歴 (History)</h1>
+        <p style="font-size:0.8rem; color:#666;">直近30件を表示しています</p>
+        <div style="overflow-x:auto;">
+            <table id="historyTable">
+                <thead>
+                    <tr>
+                        <th>日付</th>
+                        <th>人</th>
+                        <th>場所</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <button class="btn-cancel" onclick="closeHistory()" style="margin-top:15px;">閉じる</button>
+    </div>
+
     <script>
         let html5QrCode;
         let scannedId = null;
-        let isCameraRunning = false; // カメラ状態管理フラグ
+        let isCameraRunning = false;
 
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('inputDate').valueAsDate = new Date();
             
-            // 設定復元
             const savedPass = localStorage.getItem('voucher_app_pass');
             const savedUser = localStorage.getItem('voucher_app_user');
             if(savedPass) document.getElementById('authPass').value = savedPass;
             if(savedUser) document.getElementById('userSelect').value = savedUser;
 
-            // ★精度向上のための設定を追加して初期化★
-            // useBarCodeDetectorIfSupported: true にすると、Android/Chrome等のネイティブ機能を使って高速・高精度に読み取ります
-            html5QrCode = new Html5Qrcode("reader", { 
-                experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
-            });
-            
+            html5QrCode = new Html5Qrcode("reader", { experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
             startCamera();
 
-            // 画像ファイル選択時の動作
             document.getElementById('qrInputFile').addEventListener('change', scanFile);
-
-            // 合言葉を入力しようとしたらエラーメッセージを消す（UX改善）
             document.getElementById('authPass').addEventListener('input', clearMsg);
             document.getElementById('authPass').addEventListener('focus', clearMsg);
         });
@@ -132,63 +148,39 @@
         document.getElementById('userSelect').addEventListener('change', (e) => localStorage.setItem('voucher_app_user', e.target.value));
 
         function startCamera() {
-            // qrboxを指定しないことで全画面スキャンとなり、大きなQRコードも読み取りやすくなります
             const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-            
-            html5QrCode.start(
-                { facingMode: "environment" },
-                config,
-                onScanSuccess
-            ).then(() => {
-                isCameraRunning = true;
-            }).catch(err => {
-                console.log("Camera failed", err);
-                isCameraRunning = false;
-            });
+            html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+            .then(() => { isCameraRunning = true; })
+            .catch(err => { isCameraRunning = false; });
         }
 
         function scanFile(e) {
             if (e.target.files.length == 0) return;
             const imageFile = e.target.files[0];
-
             showLoading(true);
-            
             html5QrCode.scanFile(imageFile, true)
-                .then(decodedText => {
-                    showLoading(false);
-                    onScanSuccess(decodedText);
-                })
-                .catch(err => {
-                    showLoading(false);
-                    alert("QRコードを検出できませんでした。\n明るい場所で撮影された画像を試してください。");
-                });
+                .then(decodedText => { showLoading(false); onScanSuccess(decodedText); })
+                .catch(err => { showLoading(false); alert("QRコードを検出できませんでした。"); });
         }
 
         function onScanSuccess(decodedText) {
             const user = document.getElementById('userSelect').value;
             const pass = document.getElementById('authPass').value;
             const allowListRegex = /^[A-Za-z0-9\-]+$/;
-
-            // 一時停止（安全に）
+            
             safePause();
 
-            // 1. バリデーションチェック
             if (!allowListRegex.test(decodedText)) {
                 alert("警告: 不正な形式のQRコードです。\n(ID: " + decodedText + ")");
-                setTimeout(() => safeResume(), 1000); // 1秒後に再開
+                setTimeout(() => safeResume(), 1000);
                 return;
             }
-
-            // 2. 設定漏れチェック
             if (!user || !pass) {
                 alert("「合言葉」と「利用者」を設定してください");
-                // すぐ再開せず、ユーザーが設定するのを待つ挙動にするか、
-                // あるいは1秒後に再開させる
                 setTimeout(() => safeResume(), 1000);
                 return;
             }
 
-            // 3. サーバー問い合わせ
             checkServer(decodedText, user, pass);
         }
 
@@ -198,12 +190,7 @@
 
             fetch(GAS_URL, {
                 method: "POST",
-                body: JSON.stringify({
-                    action: "check",
-                    user: user,
-                    password: pass,
-                    voucher_id: id
-                })
+                body: JSON.stringify({ action: "check", user: user, password: pass, voucher_id: id })
             })
             .then(res => res.json())
             .then(data => {
@@ -212,17 +199,8 @@
                     scannedId = id;
                     showInputForm(id);
                 } else {
-                    // ★エラー時の挙動改善★
-                    // エラーメッセージを表示
                     showMsg(data.message, true);
-                    
-                    // 1.5秒後に自動的にカメラを再開させる（以前は4秒だった）
-                    // これにより、合言葉間違いなどの際もすぐに再試行できる
-                    setTimeout(() => {
-                        // エラー表示は残したままカメラだけ再開（入力修正しやすくする）
-                        // ユーザーが画面タップすれば消える
-                        safeResume();
-                    }, 1500);
+                    setTimeout(() => safeResume(), 1500);
                 }
             })
             .catch(err => {
@@ -238,22 +216,14 @@
             const date = document.getElementById('inputDate').value;
             const place = document.getElementById('inputPlace').value;
 
-            if(!date || !place) {
-                alert("日付と場所を入力してください");
-                return;
-            }
-
+            if(!date || !place) { alert("日付と場所を入力してください"); return; }
             showLoading(true);
 
             fetch(GAS_URL, {
                 method: "POST",
                 body: JSON.stringify({
-                    action: "register",
-                    password: pass,
-                    user: user,
-                    voucher_id: scannedId,
-                    input_date: date,
-                    input_place: place
+                    action: "register", 
+                    password: pass, user: user, voucher_id: scannedId, input_date: date, input_place: place
                 })
             })
             .then(res => res.json())
@@ -266,34 +236,68 @@
                     alert("エラー: " + data.message);
                 }
             })
+            .catch(err => { showLoading(false); alert("送信に失敗しました"); });
+        }
+
+        // --- 履歴機能 (New) ---
+        function fetchHistory() {
+            const pass = document.getElementById('authPass').value;
+            if(!pass) { alert("合言葉を設定してください"); return; }
+
+            showLoading(true);
+            // カメラを一時停止
+            safePause();
+
+            fetch(GAS_URL, {
+                method: "POST",
+                body: JSON.stringify({ action: "get_history", password: pass })
+            })
+            .then(res => res.json())
+            .then(data => {
+                showLoading(false);
+                if(data.status === 'success') {
+                    renderHistory(data.history);
+                } else {
+                    alert("履歴取得エラー: " + data.message);
+                    safeResume();
+                }
+            })
             .catch(err => {
                 showLoading(false);
-                alert("送信に失敗しました");
+                alert("通信エラー");
+                safeResume();
             });
         }
 
-        // --- 制御ヘルパー関数 ---
-
-        function safePause() {
-            if (isCameraRunning) {
-                try { html5QrCode.pause(); } catch(e) {}
+        function renderHistory(historyData) {
+            const tbody = document.querySelector("#historyTable tbody");
+            tbody.innerHTML = "";
+            
+            if(historyData.length === 0) {
+                tbody.innerHTML = "<tr><td colspan='3' style='text-align:center;'>履歴はありません</td></tr>";
+            } else {
+                historyData.forEach(item => {
+                    const row = `<tr><td>${item.date}</td><td>${item.user}</td><td>${item.place}</td></tr>`;
+                    tbody.innerHTML += row;
+                });
             }
+
+            document.getElementById('scanCard').style.display = 'none';
+            document.getElementById('historyArea').style.display = 'block';
         }
 
-        function safeResume() {
-            // 入力画面が出ているときはカメラ再開しない
-            if (document.getElementById('inputArea').style.display === 'block') return;
+        function closeHistory() {
+            document.getElementById('historyArea').style.display = 'none';
+            document.getElementById('scanCard').style.display = 'block';
+            safeResume();
+        }
 
-            // カメラが動いていた場合のみ再開を試みる
-            if (isCameraRunning) {
-                try {
-                    // getStateがPAUSEDの時だけresumeする（二重起動防止）
-                    // ライブラリのバージョン差異を吸収するためtry-catchで囲む
-                    html5QrCode.resume(); 
-                } catch(e) {
-                    // console.log("Resume skipped or failed", e);
-                }
-            }
+        // --- Helper ---
+        function safePause() { if (isCameraRunning) { try { html5QrCode.pause(); } catch(e) {} } }
+        function safeResume() { 
+            if (document.getElementById('inputArea').style.display === 'block') return;
+            if (document.getElementById('historyArea').style.display === 'block') return;
+            if (isCameraRunning) { try { html5QrCode.resume(); } catch(e) {} } 
         }
 
         function showInputForm(id) {
@@ -308,29 +312,19 @@
             document.getElementById('inputPlace').value = '';
             document.getElementById('qrInputFile').value = ''; 
             scannedId = null;
-            
             showMsg("", false);
             safeResume();
         }
 
         function showMsg(text, isError) {
             const el = document.getElementById('msgArea');
-            if(!text) {
-                el.style.display = 'none';
-                return;
-            }
+            if(!text) { el.style.display = 'none'; return; }
             el.textContent = text;
             el.className = 'msg ' + (isError ? 'msg-err' : 'msg-suc');
             el.style.display = 'block';
         }
-        
-        function clearMsg() {
-            showMsg("", false);
-        }
-
-        function showLoading(visible) {
-            document.getElementById('loading').style.display = visible ? 'flex' : 'none';
-        }
+        function clearMsg() { showMsg("", false); }
+        function showLoading(visible) { document.getElementById('loading').style.display = visible ? 'flex' : 'none'; }
     </script>
 </body>
 </html>

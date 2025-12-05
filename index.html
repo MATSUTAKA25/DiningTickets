@@ -156,28 +156,41 @@
 
         function scanFile(e) {
             if (e.target.files.length == 0) return;
-
             const imageFile = e.target.files[0];
+
             showLoading(true);
-            safePause();
 
-            html5QrCode.scanFile(imageFile, false)
+            // 1. まずカメラを停止を試みる
+            html5QrCode.stop().then(ignore => {
+                // 停止成功 -> ファイル解析へ
+                return performScan(imageFile);
+            }).catch(err => {
+                // カメラが元々動いていなかった場合もここに来る -> そのままファイル解析へ
+                return performScan(imageFile);
+            });
 
-                .then(decodedText => {
-                    showLoading(false);
-                    onScanSuccess(decodedText);
-                })
-
-                .catch(err => {
-                    showLoading(false);
-                    console.error("File Scan Error:", err);
-                    alert("QRコードを検出できませんでした。\n画像が鮮明か、QRコードが含まれているか確認してください。");
-                    safeResume();
-                })
-
-                .finally(() => {
-                    e.target.value = ''; 
-                });
+            // ファイル解析の実処理
+            function performScan(file) {
+                return html5QrCode.scanFile(file, false)
+                    .then(decodedText => {
+                        showLoading(false);
+                        // 成功時
+                        onScanSuccess(decodedText);
+                        // ※成功時は画面遷移などするため、カメラ再開は不要
+                    })
+                    .catch(err => {
+                        showLoading(false);
+                        // エラー内容をアラートに出す（デバッグ用）
+                        alert("読み取り失敗: " + err); 
+                        
+                        // 失敗したのでカメラを再開して元の状態に戻す
+                        startCamera();
+                    })
+                    .finally(() => {
+                        // 次回のためにinputをリセット
+                        e.target.value = ''; 
+                    });
+            }
         }
 
         function onScanSuccess(decodedText) {

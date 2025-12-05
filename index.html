@@ -154,13 +154,30 @@
             .catch(err => { isCameraRunning = false; });
         }
 
-        function scanFile(e) {
+function scanFile(e) {
             if (e.target.files.length == 0) return;
+
             const imageFile = e.target.files[0];
             showLoading(true);
-            html5QrCode.scanFile(imageFile, true)
-                .then(decodedText => { showLoading(false); onScanSuccess(decodedText); })
-                .catch(err => { showLoading(false); alert("QRコードを検出できませんでした。"); });
+            safePause();
+
+            html5QrCode.scanFile(imageFile, false)
+
+                .then(decodedText => {
+                    showLoading(false);
+                    onScanSuccess(decodedText);
+                })
+
+                .catch(err => {
+                    showLoading(false);
+                    console.error("File Scan Error:", err);
+                    alert("QRコードを検出できませんでした。\n画像が鮮明か、QRコードが含まれているか確認してください。");
+                    safeResume();
+                })
+
+                .finally(() => {
+                    e.target.value = ''; 
+                });
         }
 
         function onScanSuccess(decodedText) {
